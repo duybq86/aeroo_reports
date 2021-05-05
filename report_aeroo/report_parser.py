@@ -32,11 +32,11 @@ from odoo.modules import load_information_from_description_file
 from odoo.tools.misc import posix_to_ldml
 from odoo.exceptions import MissingError
 # for format_datetime
-from odoo.tools.misc import pycompat, DATE_LENGTH
+from odoo.tools.misc import DATE_LENGTH
 import babel.dates
 
 
-def format_datetime(env, value, lang_code=False, date_format=False):
+def format_datetime(env, value, lang_code=False, date_format=False, tz='America/Argentina/Buenos_Aires'):
     '''
         This is an adaptation of odoo format_date method but to format datetimes
         TODO we should move it to another plase or make it simpler
@@ -52,7 +52,7 @@ def format_datetime(env, value, lang_code=False, date_format=False):
     '''
     if not value:
         return ''
-    if isinstance(value, pycompat.string_types):
+    if isinstance(value, str):
         if len(value) < DATE_LENGTH:
             return ''
         if len(value) > DATE_LENGTH:
@@ -67,7 +67,7 @@ def format_datetime(env, value, lang_code=False, date_format=False):
     if not date_format:
         date_format = posix_to_ldml('%s %s' % (lang.date_format, lang.time_format), locale=locale)
 
-    return babel.dates.format_datetime(value, format=date_format, locale=locale)
+    return babel.dates.format_datetime(value, format=date_format, locale=locale, tzinfo=tz)
 
 
 _logger = logging.getLogger(__name__)
@@ -156,7 +156,7 @@ class ReportAerooAbstract(models.AbstractModel):
         y = len(localspace['value_list'])
         return float(x)/float(y)
 
-    def _asimage(self, field_value, rotate=None, size_x=None, size_y=None,
+    def _asimage(self, field_value, rotate=None, size_x=None, size_y=None, dpix=96, dpiy=96,
                  uom='px', hold_ratio=False):
         """
         Prepare image for inserting into OpenOffice.org document
@@ -180,7 +180,7 @@ class ReportAerooAbstract(models.AbstractModel):
         # usamos dpi fijos porque si no en determinados casos nos achica o
         # agranda mucho las imagenes en los reportes (al menos el logo)
         # dpi_x, dpi_y = map(float, im.info.get('dpi', (96, 96)))
-        dpi_x, dpi_y = map(float, (96, 96))
+        dpi_x, dpi_y = map(float, (dpix, dpiy))
         try:
             if rotate != None:
                 im = im.rotate(int(rotate))
@@ -327,7 +327,7 @@ class ReportAerooAbstract(models.AbstractModel):
         if source == 'current':
             return self.env.context['lang'] or self.env.context['user_lang']
         elif source == 'company':
-            return self.env.user.company_id.partner_id.lang
+            return self.env.company.partner_id.lang
         elif source == 'user':
             return self.env.context['user_lang']
 
@@ -354,7 +354,7 @@ class ReportAerooAbstract(models.AbstractModel):
         if date:
             return odoo_fd(self.env, value, lang_code=lang_code, date_format=date_format)
         elif date_time:
-            return format_datetime(self.env, value, lang_code=lang_code, date_format=date_format)
+            return format_datetime(self.env, value, lang_code=lang_code, date_format=date_format, tz=self.env.user.tz)
         return odoo_fl(
             self.env, value, digits, grouping, monetary, dp, currency_obj)
 
@@ -408,17 +408,17 @@ class ReportAerooAbstract(models.AbstractModel):
         # tmpl_type = 'odt'
         self.record_ids = docids
         self.ctx = ctx
-        self.company = self.env.user.company_id
+        self.company = self.env.company
         self.report = report
 
         #=======================================================================
         def barcode(
-                barcode_type, value, width=600, height=100, humanreadable=0):
+                barcode_type, value, width=600, height=100, dpi_x=96, dpi_y=96, humanreadable=0):
             # TODO check that asimage and barcode both accepts width and height
             img = self.env['ir.actions.report'].barcode(
                 barcode_type, value, width=width, height=height,
                 humanreadable=humanreadable)
-            return self._asimage(base64.b64encode(img))
+            return self._asimage(base64.b64encode(img), dpix=dpi_x, dpiy=dpi_y)
         self.localcontext = {
             'myset': self.myset,
             'myget': self.myget,
@@ -446,7 +446,7 @@ class ReportAerooAbstract(models.AbstractModel):
             'gettext': self._translate_text,
             'test':     self.test,
             'fields':     fields,
-            'company':     self.env.user.company_id,
+            'company':     self.env.company,
             'barcode':     barcode,
         }
         self.localcontext.update(ctx)
@@ -589,7 +589,8 @@ class ReportAerooAbstract(models.AbstractModel):
             s = BytesIO()
             output.write(s)
             data = s.getvalue()
-            res = self._context.get('return_filename') and (data, results[0][1], results[0][2]) or data, results[0][1]
+            res = self._context.get('return_filename') and\
+                (data, results[0][1], results[0][2]) or (data, results[0][1])
         else:
             res = self.assemble_tasks(docids, data, report, self._context)
         # TODO
